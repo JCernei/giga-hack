@@ -1,17 +1,20 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-from PyPDF2 import PdfReader  # For PDF files
-import docx  # For Word files
-from PIL import Image  # For image files (jpg/png)
-import pytesseract  # For OCR on image files
-import openpyxl  # For .xlsx files
-import xlrd  # For .xls files
+from PyPDF2 import PdfReader
+import docx 
+from PIL import Image
+import pytesseract
+import openpyxl
+import xlrd
 from reportlab.lib.units import mm
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 import textwrap
+import json
 import os
 import time
+from ai_processing import process_contract
+from pdf_generator import generate_invoice_from_text
 
 app = Flask(__name__)
 CORS(app)
@@ -69,44 +72,6 @@ def extract_text_from_xls(file_path):
             text += '\t'.join([str(cell) for cell in row_values]) + '\n'
     return text
 
-def generate_invoice_from_text(text, original_filename):
-    # Create a unique invoice filename based on timestamp and original filename
-    timestamp = int(time.time())
-    invoice_filename = f'invoice_{timestamp}_{original_filename}.pdf'
-    invoice_path = os.path.join(INVOICE_FOLDER, invoice_filename)
-    
-    # Create a new PDF using ReportLab
-    c = canvas.Canvas(invoice_path, pagesize=A4)
-    
-    # Set some title text at the top of the PDF
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(100, 800, "Invoice")
-
-    # Add a timestamp or date (optional)
-    c.setFont("Helvetica", 12)
-    c.drawString(100, 780, f"Date: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-
-    # Add the extracted text to the PDF, adjusting text placement on the page
-    text_lines = text.splitlines()  # Split the text into lines to avoid text overflow
-    c.setFont("Helvetica", 10)
-    
-    # Start adding text to the PDF below the title
-    y = 750  # Initial Y position for text
-    line_height = 12  # Spacing between lines
-
-    for line in text_lines:
-        if y <= 40:  # Avoid writing beyond the bottom of the page
-            c.showPage()  # Create a new page if necessary
-            y = 800  # Reset Y position for new page
-
-        c.drawString(100, y, line)
-        y -= line_height
-
-    # Save the PDF
-    c.save()
-    
-    return invoice_path
-
 @app.route('/api/convert-contract', methods=['POST'])
 def convert_contract():
     if 'contract' not in request.files:
@@ -142,8 +107,11 @@ def convert_contract():
     with open(text_filepath, 'w') as text_file:
         text_file.write(text)
 
+    # Process the extracted text with the AI model
+    processed_text = process_contract(text)
+    
     # Generate a unique invoice based on the uploaded file
-    invoice_path = generate_invoice_from_text(text, os.path.splitext(file.filename)[0])
+    invoice_path = generate_invoice_from_text(processed_text, os.path.splitext(file.filename)[0])
 
     # Return the URL to download the generated invoice and the extracted text file
     return jsonify({
